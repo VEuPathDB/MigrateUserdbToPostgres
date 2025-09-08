@@ -1,0 +1,129 @@
+#!/usr/bin/perl
+use strict;
+use DBI;
+use File::Copy;
+use File::Copy::Recursive;
+#use warnings;
+
+my ($sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost) = @ARGV;
+
+# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda
+
+my @sourceSchemas = ('userlogins5', 'announce', 'metrics', 'uploads', 'multiblast', 'edauser');
+
+my $targetSchemas = {
+	       'wdkuser' => { 'ddlFile' => "WDK/Model/data/create_schema_wdkuser_postgres.sql",
+			      'sourceSchema' => 'userlogins5',
+			      'tablesToKeep' => ['DATASETS', 'DATASET_VALUES', 'FAVORITES', 'PREFERENCES', 'STEPS', 'STEP_ANALYSIS', 'STRATEGIES', 'USERS', 'USER_BASKETS'],
+			      'columnsToRemove' => {'user_baskets' => ['is_default', 'category_id', 'prev_basket_id', 'migration_id'],
+						    'favorites' => ['prev_favorite_id', 'migration_id'],
+						    'datasets' => ['category_id', 'prev_dataset_id', 'migration_id'],
+						    'dataset_values' => ['prev_dataset_value_id', 'migration_id'],
+						    'steps' => ['answer_filter', 'result_message', 'prev_step_id', 'migration_id'],
+						    'strategies' => ['prev_strategy_id', 'migration_id'],
+						   }
+			    },
+	       'usercomments' => { 'ddlFile' => "ApiCommonData/Load/lib/sql/comments/psql/createCommentTables.sql",
+				   'sourceSchema' => 'userlogins5',
+				   'tablesToKeep' => ['COMMENT_TARGET', 'REVIEW_STATUS', 'TARGETCATEGORY', 'COMMENTS', 'COMMENTFILE', 'COMMENTREFERENCE', 'COMMENTSEQUENCE', 'COMMENTSTABLEID', 'COMMENTTARGETCATEGORY', 'EXTERNAL_DATABASES', 'COMMENT_EXTERNAL_DATABASE', 'LOCATIONS', 'COMMENT_USERS'],
+				  },
+	       'announce' => { 'ddlFile' => "WDK/Model/data/create_schema_announce_postgres.sql" },
+	       'metrics' => { 'ddlFile' => "MetricsReports/usage/lib/sql/create_metrics_schema_postgres.sql" },
+	       'uploads' => { 'ddlFile' => "WDK/Model/data/create_schema_uploads_postgres.sql" },
+	       'multiblast' => { 'ddlFile' => "service-multi-blast/databases/wdk/user-tables-postgres.sql" },
+	       'edauser' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/us/postgres/createDbSchema.sql" }
+	      };
+
+# confirm that the needed repos are checked out
+foreach my $schemaName (keys %$targetSchemas) {
+  my $ddlFile = $targetSchemas->{$schemaName}->{ddlFile};
+  die "DDL file $ddlFile does not exist\n" unless -e $ddlFile;
+}
+
+# dump oracle schemas to raw files
+die "$workspaceDir must not exist" if -e $workspaceDir;
+mkdir "$workspaceDir/raw" || die "Failed creating dir $workspaceDir/raw\n";
+foreach my $sourceSchema (@sourceSchemas) {
+  mkdir "$workspaceDir/raw/$sourceSchema" || die "Failed creating dir $workspaceDir/raw/$sourceSchema\n";
+  chdir "$workspaceDir/raw/$sourceSchema" || die "Failed chdir $workspaceDir/raw/$sourceSchema\n";
+  my $cmd = "dumpOracleSchemaToCsvFiles $oracleInstance $dbuser $dbpass $sourceSchema";
+  if (system("$cmd")) {
+    print STDERR ">>> execution failed: $!\n\n";
+
+    $cmd =~ s/\Q$dbpass/******/gi;
+    print STDERR ">>> failed command: $cmd\n\n";
+    die;
+  }
+}
+
+# create cleaned files
+mkdir "$workspaceDir/clean" || die "Failed creating dir $workspaceDir/clean\n";
+foreach my $targetSchema (keys %$targetSchemas) {
+  my $sourceSchema = $targetSchemas->{$targetSchema}->{sourceSchema}?
+    $targetSchemas->{$targetSchema}->{sourceSchema} :
+    $targetSchema;
+  my $tablesToKeep = $targetSchemas->{$targetSchema}->{tablesToKeep};
+  if ($tablesToKeep) {
+    mkdir "$workspaceDir/clean/$targetSchema";
+    foreach my $table (@$tablesToKeep) {
+      my $colsToRemove = $targetSchemas->{$targetSchema}->{columnsToRemove}->{$table};
+      if ($colsToRemove) {
+	my $colsToRmvStr = join(' ', @$colsToRemove);
+	my $cmd = "exciseColumnsFromCsvFile $workspaceDir/raw/$sourceSchema/$table.csv $colsToRmvStr > $workspaceDir/clean/$targetSchema/$table.csv";
+	system($cmd) && die "Failed running $cmd $!\n";
+      } else {
+	copy("$workspaceDir/raw/$sourceSchema/$table.csv", "$workspaceDir/clean/$targetSchema/$table.csv") or die "Failed: copy(\"$workspaceDir/raw/$sourceSchema/$table.csv\", \"$workspaceDir/clean/$targetSchema/$table.csv\")\n";
+      }
+    }
+  } else {
+    dircopy("$workspaceDir/raw/$sourceSchema", "$workspaceDir/clean/$targetSchema") or die "Failed: dircopy(\"$workspaceDir/raw/$sourceSchema\", \"$workspaceDir/clean/$targetSchema/\")\n";
+  }
+}
+
+my $pgDsn = "";
+my $pgDbh = DBI->connect($pgDsn, $dbuser, $dbpass, {
+						    RaiseError => 1}) or die $DBI::errstr;
+
+mkdir "$workspaceDir/logs" || die "Can't mkdir $workspaceDir/logs\n";
+
+foreach my $schemaName (keys %$targetSchemas) {
+  my $logFile = "$workspaceDir/logs/$schemaName";
+  
+  # drop old schema
+  $pgDbh->do("drop schema $schemaName if exists");
+
+  # create new schema
+  my $ddlFile = $targetSchemas->{$schemaName}->{ddlFile};
+  my $cmd = getPsqlCommandLine($ddlFile, $logFile, $dbuser, $dbpass, $pgDatabase, $pgHost);
+  runPsqlCmd($cmd, $logFile, $dbpass);
+}
+
+# create schema
+# dump (if dump flag)
+# excise columns
+# load
+
+sub getPsqlCommandLine {
+  my ($filename, $logfile, $login, $password, $database, $hostname) = @_;
+
+  my $connectionString = "postgresql://$login:$password\@$hostname/$database";
+
+  # Temporarily remove --echo-errors as it is not supported in older psql versions
+  # return "psql --echo-all --echo-errors --log-file='$logFileName' --command='$copyCommand' $connectionString $quiet"
+  return "psql --echo-all --log-file='$logfile' --file=$filename $connectionString"
+}
+
+sub runPsqlCmd {
+  my ($cmdLine, $logFileName, $dbPassword) = @_;
+
+  if (system("$cmdLine")) {
+    print STDERR ">>> psql execution failed: $!\n\n";
+
+    $cmdLine =~ s/\Q$dbPassword/******/gi;
+    print STDERR ">>> psql failed command: $cmdLine\n\n";
+
+    printFileToStdErr($logFileName, "psql");
+    die;
+  }
+}
+

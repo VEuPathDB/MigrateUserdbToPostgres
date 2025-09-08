@@ -1,0 +1,63 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# Check for minimum arguments
+if (@ARGV < 2) {
+    die "Usage: $0 <csv_file> <colname1> [<colname2> ...]\n";
+}
+
+my $filename = shift @ARGV;
+my @colnames_to_remove = @ARGV;
+my %remove_by_name = map { $_ => 1 } @colnames_to_remove;
+
+open(my $fh, '<', $filename) or die "Cannot open file '$filename': $!\n";
+
+# Read and parse header row
+my $header_line = <$fh>;
+chomp $header_line;
+
+my @header_fields;
+while ($header_line =~ /`((?:[^`]|``)*)`/g) {
+    my $field = $1;
+#    $field =~ s/``/`/g;
+    push @header_fields, $field;
+}
+
+# Map column names to indices
+my %remove_by_index;
+for my $i (0 .. $#header_fields) {
+    if ($remove_by_name{$header_fields[$i]}) {
+        $remove_by_index{$i} = 1;
+    }
+}
+
+# Print updated header
+my @kept_header_indices = grep { !$remove_by_index{$_} } 0 .. $#header_fields;
+my @kept_header = map {
+    my $f = $header_fields[$_];
+#    $f =~ s/`/``/g;
+    "`$f`"
+} @kept_header_indices;
+print join(",", @kept_header), "\n";
+
+# Process remaining lines
+while (my $line = <$fh>) {
+    chomp $line;
+    my @fields;
+    while ($line =~ /`((?:[^`]|``)*)`/g) {
+        my $field = $1;
+#        $field =~ s/``/`/g;
+        push @fields, $field;
+    }
+
+    my @kept_fields = map {
+        my $f = $fields[$_];
+#        $f =~ s/`/``/g;
+        "`$f`"
+    } @kept_header_indices;
+
+    print join(",", @kept_fields), "\n";
+}
+
+close($fh);
