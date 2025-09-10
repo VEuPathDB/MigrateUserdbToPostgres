@@ -1,13 +1,14 @@
 #!/usr/bin/perl
 use strict;
-use warnings;
+#use warnings;
 use DBI;
+use Scalar::Util qw(looks_like_number);
 
 # Discover the tables in the provided target_schema.  Dump each table to a tablename.csv file, including a header with column names.
 # Use backtick as field delimiter.  Escape backticks in the data.
 
 # Check command-line arguments
-if (@ARGV != 3) {
+if (@ARGV != 4) {
     die "Usage: $0 <dbinstance> <user> <passwd> <target_schema>\n";
   }
 
@@ -20,9 +21,17 @@ my $dsn = "dbi:Oracle:$instance";
 my $dbh = DBI->connect($dsn, $dbuser, $dbpass, {
     RaiseError => 1,
     AutoCommit => 0,
-    LongReadLen => 50000000
+    LongReadLen => 50000000,
+on_connect_do => [
+            qq[ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'],
+            qq[ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS'],
+            qq[ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT  = 'YYYY-MM-DD HH24:MI:SS TZHTZM'],
+        ],
+
                                                }) or die $DBI::errstr;
 
+$dbh->do("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") || die "FAILED";
+$dbh->do("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") || die "FAILED";
 # Get table names
 my $table_sth = $dbh->prepare("
     SELECT table_name FROM all_tables WHERE owner = UPPER(?) ORDER BY table_name
@@ -30,27 +39,53 @@ my $table_sth = $dbh->prepare("
 $table_sth->execute($target_schema);
 
 while (my ($table_name) = $table_sth->fetchrow_array) {
-  next if $table_name eq 'DATASETS';
-    print "Exporting table: $table_name\n";
+  next if $table_name eq 'DATASET_VALUES';
+  next unless $table_name eq 'USERFILE';
+  print "Exporting table: $table_name\n";
 
-    my $sql = "SELECT * FROM $target_schema.$table_name";
+
+  my $sql = "SELECT * FROM $target_schema.$table_name";
+
+
+  if ($table_name eq "DATASETS") {
+    $sql = "SELECT DATASET_ID, USER_ID,DATASET_NAME,DATASET_SIZE,CONTENT_CHECKSUM,CREATED_TIME,UPLOAD_FILE,PARSER,CATEGORY_ID,PREV_DATASET_ID,MIGRATION_ID from $target_schema.datasets";
+  } elsif ($table_name eq "USER_BASKETS") {
+    $sql = "select basket_id, user_id, basket_name, project_id, record_class, pk_column_1, pk_column_2, pk_column_3 from $target_schema.user_baskets";
+  } elsif ($table_name eq "FAVORITES") {
+    $sql = "select favorite_id, user_id, project_id, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted from $target_schema.favorites";
+  } elsif ($table_name eq "DATASET_VALUES") {
+    $sql = "select dataset_value_id, dataset_id, dataset_value_order, data1, data2, data3, data4, data5, data6, data7 from $target_schema.dataset_values";
+  } elsif ($table_name eq "STEPS") {
+    $sql = "select step_id, user_id, left_child_id, right_child_id, create_time, last_run_time, estimate_size, custom_name, is_deleted, is_valid, collapsed_name, is_collapsible, assigned_weight, project_id, project_version, question_name, strategy_id, display_params, display_prefs, branch_is_expanded, branch_name from $target_schema.steps";
+  } elsif ($table_name eq "STRATEGIES") {
+    $sql = "select strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public from $target_schema.strategies";
+  } elsif ($table_name eq "STEP_ANALYSIS") {
+    $sql = "select analysis_id, step_id, display_name, user_notes, is_new as revision_status, has_params, invalid_step_reason, context_hash, context, properties from $target_schema.step_analysis";
+  }
+
     my $data_sth = $dbh->prepare($sql);
     $data_sth->execute();
 
     # Column names
     my @columns = @{$data_sth->{NAME}};
 
+#    my $colsStr = join(", ", @columns);
+#    my $sql = "SELECT $colsStr FROM $target_schema.$table_name";
+#    my $data_sth = $dbh->prepare($sql);
+#    $data_sth->execute();
+
+
     # Open file
     open my $fh, '>', "$table_name.csv" or die "Cannot open $table_name.csv: $!";
 
     # Print header
-    print $fh join(",", map { "`$_`" } @columns), "\n";
+    print $fh join(",", map { "$_" } @columns), "\n";
 
     # Print rows
     while (my $row = $data_sth->fetchrow_arrayref) {
         my @escaped = map {
-            defined $_ ? "`" . escape($_) . "`" : '``'
-          } @$row;
+          looks_like_number($_)? $_ : (defined $_ ? "`" . escape($_) . "`" : '')
+        } @$row;
         print $fh join(",", @escaped), "\n";
       }
 
