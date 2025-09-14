@@ -2,7 +2,6 @@
 use strict;
 use DBI;
 use File::Copy;
-use File::Copy::Recursive qw(dircopy);
 use FindBin;
 use File::Spec;
 use File::Basename;
@@ -10,7 +9,7 @@ use FindBin;
 use lib "$FindBin::Bin/../lib/perl";
 use ApiCommonData::Load::Psql;
 
-my ($sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $doDump) = @ARGV;
+my ($sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
 
 die "
 Usage: migrateUserdbToPostgres sourcecode_dir workspace_dir dbuser dbpass oracle_instance pg_database pg_host
@@ -23,26 +22,30 @@ my @sourceSchemas = ('userlogins5', 'announce', 'metrics', 'uploads', 'edauser')
 my $targetSchemas = {
 	       'wdkuser' => { 'ddlFile' => "WDK/Model/data/create_schema_wdkuser_postgres.sql",
 			      'sourceSchema' => 'userlogins5',
-#			      'tablesToKeep' => ['DATASETS', 'DATASET_VALUES', 'FAVORITES', 'PREFERENCES', 'STEPS', 'STEP_ANALYSIS', 'STRATEGIES', 'USERS', 'USER_BASKETS'],
-			      'tablesToKeep' => ['DATASETS', 'FAVORITES', 'PREFERENCES', 'STEPS', 'STEP_ANALYSIS', 'STRATEGIES', 'USERS', 'USER_BASKETS'],
-			      'columnsToRemove' => {'user_baskets' => ['IS_DEFAULT', 'CATEGORY_ID', 'PREV_BASKET_ID', 'MIGRATION_ID'],
-						    'favorites' => ['PREV_FAVORITE_ID', 'MIGRATION_ID'],
-						    'datasets' => ['CATEGORY_ID', 'PREV_DATASET_ID', 'MIGRATION_ID'],
-						   # 'dataset_values' => ['PREV_DATASET_VALUE_ID', 'MIGRATION_ID'],
-						    'steps' => ['ANSWER_FILTER', 'RESULT_MESSAGE', 'PREV_STEP_ID', 'MIGRATION_ID'],
-						    'strategies' => ['PREV_STRATEGY_ID', 'MIGRATION_ID'],
-						   }
+			      'tablesToKeep' => ['USERS', 'PREFERENCES', 'USER_BASKETS', 'FAVORITES',
+                                                 'DATASETS', 'DATASET_VALUES',
+                                                 'STEPS', 'STRATEGIES', 'STEP_ANALYSIS'],
 			    },
 	       'usercomments' => { 'ddlFile' => "ApiCommonData/Load/lib/sql/comments/psql/createCommentTables.sql",
 				   'sourceSchema' => 'userlogins5',
-				   'tablesToKeep' => ['COMMENT_TARGET', 'REVIEW_STATUS', 'TARGETCATEGORY', 'COMMENTS', 'COMMENTFILE', 'COMMENTREFERENCE', 'COMMENTSEQUENCE', 'COMMENTSTABLEID', 'COMMENTTARGETCATEGORY', 'EXTERNAL_DATABASES', 'COMMENT_EXTERNAL_DATABASE', 'LOCATIONS', 'COMMENT_USERS'],
+				   'tablesToKeep' => ['COMMENTS', 'COMMENTFILE', 'COMMENTREFERENCE', 'COMMENTSEQUENCE', 'COMMENTSTABLEID', 'COMMENTTARGETCATEGORY', 'EXTERNAL_DATABASES', 'COMMENT_EXTERNAL_DATABASE', 'LOCATIONS', 'COMMENT_USERS'],
 				  },
-	       'announce' => { 'ddlFile' => "WDK/Model/data/create_schema_announce_postgres.sql" },
-	       'metrics' => { 'ddlFile' => "MetricsReports/usage/lib/sql/create_metrics_schema_postgres.sql" },
-	       'uploads' => { 'ddlFile' => "WDK/Model/data/create_schema_uploads_postgres.sql" },
+	       'announce' => { 'ddlFile' => "WDK/Model/data/create_schema_announce_postgres.sql",
+			      'tablesToKeep' => ['MESSAGES', 'MESSAGE_PROJECTS']
+                             },
+	       'metrics' => { 'ddlFile' => "MetricsReports/usage/lib/sql/create_metrics_schema_postgres.sql",
+			      'tablesToKeep' => ['GENEPAGETABLESTATS', 'RECORDPAGEVIEWSTATS', 'STEPSPERORGANISM', 'ORGANISMSPERSTEP', 'ORGANISMVIEWSTATS', 'SEARCHESSTATS', 'TOOLSSTATS', 'AWSTATS', 'LOGINSTATS', 'PAGEVIEWSTATS', 'USERDATASETSSTATS']
+                            },
+	       'uploads' => { 'ddlFile' => "WDK/Model/data/create_schema_uploads_postgres.sql",
+			      'tablesToKeep' => ['USERFILE']
+                            },
 	       'multiblast' => { 'ddlFile' => "service-multi-blast/databases/wdk/user-tables-postgres.sql",
-                               'sourceSchema' => 'userlogins5'},
-	       'edauser' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/us/postgres/createDbSchema.sql" }
+                               'sourceSchema' => 'userlogins5',
+			      'tablesToKeep' => ['MULTIBLAST_JOBS', 'MULTIBLAST_JOB_TO_TARGETS', 'MULTIBLAST_JOB_TO_JOBS', 'MULTIBLAST_USERS', 'MULTIBLAST_FMT_JOBS', 'MULTIBLAST_USERS_TO_FMT_JOBS'],
+                               },
+	       'edauser' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/us/postgres/createDbSchema.sql",
+			      'tablesToKeep' => ['USERS', 'ANALYSIS']
+                            }
 	      };
 
 # confirm that the needed repos are checked out
@@ -52,53 +55,38 @@ foreach my $schemaName (keys %$targetSchemas) {
 }
 
 # dump oracle schemas to csv files
-if ($doDump) {
-  die "$workspaceDir must not exist" if -e $workspaceDir;
-  mkdir "$workspaceDir" || die "Failed creating dir $workspaceDir\n";
-  mkdir "$workspaceDir/dump" || die "Failed creating dir $workspaceDir/dump\n";
-  foreach my $sourceSchema (@sourceSchemas) {
-    print STDERR "Dumping $sourceSchema\n";
-    mkdir "$workspaceDir/dump/$sourceSchema" || die "Failed creating dir $workspaceDir/dump/$sourceSchema\n";
-    chdir "$workspaceDir/dump/$sourceSchema" || die "Failed chdir $workspaceDir/dump/$sourceSchema\n";
-    my $cmd = "$FindBin::Bin/dumpOracleSchemaToCsvFiles $oracleInstance $dbuser $dbpass $sourceSchema";
-    if (system("$cmd")) {
-      print STDERR ">>> execution failed: $!\n\n";
+unless (-e $workspaceDir) { mkdir "$workspaceDir" || die "Failed creating dir $workspaceDir\n"; }
+unless (-e "$workspaceDir/dump") {mkdir "$workspaceDir/dump" || die "Failed creating dir $workspaceDir/dump\n"; }
+foreach my $sourceSchema (@sourceSchemas) {
+  print STDERR "Dumping $sourceSchema\n";
+  unless (-e "$workspaceDir/dump/$sourceSchema") { mkdir "$workspaceDir/dump/$sourceSchema" || die "Failed creating dir $workspaceDir/dump/$sourceSchema\n"; }
+  chdir "$workspaceDir/dump/$sourceSchema" || die "Failed chdir $workspaceDir/dump/$sourceSchema\n";
+  my $cmd = "$FindBin::Bin/dumpOracleSchemaToCsvFiles $oracleInstance $dbuser $dbpass $sourceSchema";
+  if (system("$cmd")) {
+    print STDERR ">>> execution failed: $!\n\n";
 
-      $cmd =~ s/\Q$dbpass/******/gi;
-      print STDERR ">>> failed command: $cmd\n\n";
-      die;
-    }
+    $cmd =~ s/\Q$dbpass/******/gi;
+    print STDERR ">>> failed command: $cmd\n\n";
+    die;
   }
 }
 
-=pod
 # create cleaned files
+`rm -r $workspaceDir/clean`;
 mkdir "$workspaceDir/clean" || die "Failed creating dir $workspaceDir/clean\n";
 foreach my $targetSchema (keys %$targetSchemas) {
   my $sourceSchema = $targetSchemas->{$targetSchema}->{sourceSchema}?
     $targetSchemas->{$targetSchema}->{sourceSchema} :
     $targetSchema;
   my $tablesToKeep = $targetSchemas->{$targetSchema}->{tablesToKeep};
-  if ($tablesToKeep) {
-    mkdir "$workspaceDir/clean/$targetSchema";
-    foreach my $table (@$tablesToKeep) {
-      my $colsToRemove = $targetSchemas->{$targetSchema}->{columnsToRemove}->{lc($table)};
-      if ($colsToRemove) {
-        print STDERR "Removing columns from $table\n";
-	my $colsToRmvStr = join(' ', @$colsToRemove);
-	my $cmd = "$FindBin::Bin/exciseColumnsFromCsvFile $workspaceDir/raw/$sourceSchema/$table.csv $colsToRmvStr > $workspaceDir/clean/$targetSchema/$table.csv";
-	system($cmd) && die "Failed running $cmd $!\n";
-      } else {
-        my $cmd = "ln -s $workspaceDir/raw/$sourceSchema/$table.csv $workspaceDir/clean/$targetSchema/$table.csv";
-	system($cmd) && die "Failed running '$cmd': $!\n";
-      }
+  mkdir "$workspaceDir/clean/$targetSchema";
+  foreach my $table (@$tablesToKeep) {
+    my $cmd = "ln -s $workspaceDir/dump/$sourceSchema/$table.csv $workspaceDir/clean/$targetSchema/$table.csv";
+    if (-e "$workspaceDir/dump/$sourceSchema/$table.csv") {
+      system($cmd) && die "Failed running '$cmd': $!\n";
     }
-  } else {
-    my $cmd = "ln -s $workspaceDir/raw/$sourceSchema $workspaceDir/clean/$targetSchema";
-    system($cmd) && die "Failed running '$cmd': $!\n";
   }
 }
-=cut
 
 my $pgDsn = "dbi:Pg:dbname=$pgDatabase;host=$pgHost;port=5432";
 my $pgDbh = DBI->connect($pgDsn, $dbuser, $dbpass, {
@@ -106,19 +94,22 @@ my $pgDbh = DBI->connect($pgDsn, $dbuser, $dbpass, {
 
 mkdir "$workspaceDir/logs" || die "Can't mkdir $workspaceDir/logs\n";
 
-foreach my $schemaName (keys %$targetSchemas) {
-  my $logFile = "$workspaceDir/logs/$schemaName";
+if ($createSchemas) {
+  `rm -r $workspaceDir/load`;
+  foreach my $schemaName (keys %$targetSchemas) {
+    my $logFile = "$workspaceDir/logs/$schemaName";
   
-  # drop old schema
-  $pgDbh->do("drop schema if exists $schemaName cascade");
+    # drop old schema
+    $pgDbh->do("drop schema if exists $schemaName cascade");
 
-  # create new schema
-  my $ddlFile = $targetSchemas->{$schemaName}->{ddlFile};
-  my $cmd = getPsqlCommandLine("$sourceCodeDir/$ddlFile", $logFile, $dbuser, $dbpass, $pgDatabase, $pgHost);
-  runPsqlCmd($cmd, $logFile, $dbpass);
+    # create new schema
+    my $ddlFile = $targetSchemas->{$schemaName}->{ddlFile};
+    my $cmd = getPsqlCommandLine("$sourceCodeDir/$ddlFile", $logFile, $dbuser, $dbpass, $pgDatabase, $pgHost);
+    runPsqlCmd($cmd, $logFile, $dbpass);
+  }
 }
 
-loadCsvFiles("$workspaceDir/dump", "$workspaceDir/logs", $dbuser, $dbpass, $pgDatabase, $pgHost);
+loadCsvFiles($workspaceDir, $targetSchemas, "$workspaceDir/clean", "$workspaceDir/logs", $dbuser, $dbpass, $pgDatabase, $pgHost, $pgDbh);
 
 
 ########################################################################################
@@ -131,8 +122,8 @@ sub getPsqlCommandLine {
 
   # Temporarily remove --echo-errors as it is not supported in older psql versions
   # return "psql --echo-all --echo-errors --log-file='$logFileName' --command='$copyCommand' $connectionString $quiet"
-#  return "psql --echo-all --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
-  return "psql --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
+  return "psql --echo-all --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
+#  return "psql --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
 }
 
 sub runPsqlCmd {
@@ -184,7 +175,7 @@ sub bulkLoadTablePostgres {
   close $fh;
 
   $headerLine =~ s/`//g;
-  my @fields = split(/\t/, $headerLine);
+  my @fields = split(/,/, $headerLine);
 
   $psqlObj->setFields(\@fields);
 
@@ -203,32 +194,30 @@ sub bulkLoadTablePostgres {
 }
 
 sub loadCsvFiles {
-  my ($dumpDir, $logDir, $dbuser, $dbpass, $dbname, $dbhost) = @_;
+  my ($workspaceDir, $targetSchemas, $cleanDir, $logDir, $dbuser, $dbpass, $dbname, $dbhost, $pgDbh) = @_;
 
-    # Open the input directory
-    opendir(my $dh, $dumpDir) or die "Cannot open directory '$dumpDir': $!";
+  unless (-e "$workspaceDir/load") { mkdir "$workspaceDir/load" || die "Failed mkdir $workspaceDir/load \n"; }
 
-    # Loop through schemas in dump dir
-    while (my $schema = readdir($dh)) {
-        next if $schema =~ /^\.\.?$/;  # Skip . and ..
-        my $schemaDir = File::Spec->catdir($dumpDir, $schema);
-        die "expected a dir: $schemaDir\n" unless -d $schemaDir;
+  # Loop through schemas in dump dir
+  foreach my $schemaName (keys %$targetSchemas) {
+    print STDERR "Loading schema: $schemaName\n";
 
-        print STDERR "Loading schema: $schemaDir\n";
+    unless (-e "$workspaceDir/load/$schemaName") { mkdir "$workspaceDir/load/$schemaName" || die "Failed mkdir $workspaceDir/load/$schemaName \n"; }
 
-        # Open the subdirectory
-        opendir(my $sdh, $schemaDir) or die "Cannot open subdirectory '$schemaDir': $!";
-        while (my $file = readdir($sdh)) {
-            next if $file =~ /^\.\.?$/;  # Skip . and ..
-            my $filepath = File::Spec->catfile($schemaDir, $file);
-            $file =~ /(.+).csv$/;
-            my $tableName = $1;
-            die "Expected regular file: $filepath\n" unless -f $filepath;    # Skip if not a regular file
-            print STDERR "  $tableName\n";
-            bulkLoadTablePostgres($schema, $tableName, $filepath, $logDir, $dbuser, $dbpass, $dbname, $dbhost);
-          }
-        closedir($sdh);
+    my $tablesToKeep = $targetSchemas->{$schemaName}->{tablesToKeep};
+    foreach my $tableName (@$tablesToKeep) {
+      if (-e "$workspaceDir/load/$schemaName/$tableName") {
+        print STDERR "Found load file for $tableName\n";
+        next;
       }
-
-    closedir($dh);
+      my $filepath = "$cleanDir/$schemaName/$tableName.csv";
+      next unless -e $filepath;
+      print STDERR "=== $tableName ===\n";
+      my $startTime = time;
+      bulkLoadTablePostgres($schemaName, $tableName, $filepath, $logDir, $dbuser, $dbpass, $dbname, $dbhost);
+      print STDERR "  done: " . (time - $startTime) . "s\n\n";
+      `touch $workspaceDir/load/$schemaName/$tableName`;
+    }
   }
+
+}

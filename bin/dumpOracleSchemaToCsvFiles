@@ -22,33 +22,33 @@ my $dbh = DBI->connect($dsn, $dbuser, $dbpass, {
     RaiseError => 1,
     AutoCommit => 0,
     LongReadLen => 50000000,
-on_connect_do => [
-            qq[ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'],
-            qq[ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS'],
-            qq[ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT  = 'YYYY-MM-DD HH24:MI:SS TZHTZM'],
-        ],
-
                                                }) or die $DBI::errstr;
 
-$dbh->do("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") || die "FAILED";
+
 $dbh->do("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") || die "FAILED";
+$dbh->do("ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT = 'YYYY-MM-DD HH24:MI:SS TZH:TZM'") || die "FAILED";
+
 # Get table names
 my $table_sth = $dbh->prepare("
     SELECT table_name FROM all_tables WHERE owner = UPPER(?) ORDER BY table_name
+
+
 ");
 $table_sth->execute($target_schema);
 
 while (my ($table_name) = $table_sth->fetchrow_array) {
-  next if $table_name eq 'DATASET_VALUES';
-  next unless $table_name eq 'USERFILE';
-  print "Exporting table: $table_name\n";
+#  next if $table_name eq 'DATASET_VALUES';
 
+  if (-e "$table_name.csv") {
+    print "Found file: $table_name.csv\n";
+    next;
+  }
+  print "Exporting table: $table_name\n";
 
   my $sql = "SELECT * FROM $target_schema.$table_name";
 
-
   if ($table_name eq "DATASETS") {
-    $sql = "SELECT DATASET_ID, USER_ID,DATASET_NAME,DATASET_SIZE,CONTENT_CHECKSUM,CREATED_TIME,UPLOAD_FILE,PARSER,CATEGORY_ID,PREV_DATASET_ID,MIGRATION_ID from $target_schema.datasets";
+    $sql = "SELECT DATASET_ID, USER_ID,DATASET_NAME,DATASET_SIZE,CONTENT_CHECKSUM,CREATED_TIME,UPLOAD_FILE,PARSER from $target_schema.datasets";
   } elsif ($table_name eq "USER_BASKETS") {
     $sql = "select basket_id, user_id, basket_name, project_id, record_class, pk_column_1, pk_column_2, pk_column_3 from $target_schema.user_baskets";
   } elsif ($table_name eq "FAVORITES") {
@@ -58,10 +58,11 @@ while (my ($table_name) = $table_sth->fetchrow_array) {
   } elsif ($table_name eq "STEPS") {
     $sql = "select step_id, user_id, left_child_id, right_child_id, create_time, last_run_time, estimate_size, custom_name, is_deleted, is_valid, collapsed_name, is_collapsible, assigned_weight, project_id, project_version, question_name, strategy_id, display_params, display_prefs, branch_is_expanded, branch_name from $target_schema.steps";
   } elsif ($table_name eq "STRATEGIES") {
-    $sql = "select strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public from $target_schema.strategies";
+    $sql = "select strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public from $target_schema.strategies where root_step_id in (select step_id from $target_schema.steps)";
   } elsif ($table_name eq "STEP_ANALYSIS") {
     $sql = "select analysis_id, step_id, display_name, user_notes, is_new as revision_status, has_params, invalid_step_reason, context_hash, context, properties from $target_schema.step_analysis";
-  }
+  } 
+#  else { next; }
 
     my $data_sth = $dbh->prepare($sql);
     $data_sth->execute();
@@ -101,6 +102,7 @@ print "All tables exported successfully.\n";
 # Escape backticks and commas (basic)
 sub escape {
     my $val = shift;
+    $val =~ s/\x00//g;   # remove null ascii characters that break pg COPY
     $val =~ s/`/``/g;        # Escape backticks
     $val =~ s/\r?\n/ /g;     # Remove newlines
     return $val;
