@@ -53,6 +53,10 @@ while (my ($table_name) = $table_sth->fetchrow_array) {
     $sql = "select basket_id, user_id, basket_name, project_id, record_class, pk_column_1, pk_column_2, pk_column_3 from $target_schema.user_baskets";
   } elsif ($table_name eq "FAVORITES") {
     $sql = "select favorite_id, user_id, project_id, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted from $target_schema.favorites";
+  } elsif ($table_name eq "EXTERNAL_DATABASES") {
+    $sql = "select external_database_id, external_database_name, external_database_version  from $target_schema.external_databases";
+  } elsif ($table_name eq "LOCATIONS") {
+    $sql = "select comment_id, location_id, location_start, location_end, coordinate_type, is_reverse from $target_schema.locations";
   } elsif ($table_name eq "DATASET_VALUES") {
     $sql = "select dataset_value_id, dataset_id, dataset_value_order, data1, data2, data3, data4, data5, data6, data7 from $target_schema.dataset_values";
   } elsif ($table_name eq "STEPS") {
