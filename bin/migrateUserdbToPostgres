@@ -9,13 +9,13 @@ use FindBin;
 use lib "$FindBin::Bin/../lib/perl";
 use ApiCommonData::Load::Psql;
 
-my ($sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
+my ($userOrAccount, $sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
 
 die "
-Usage: migrateUserdbToPostgres sourcecode_dir workspace_dir dbuser dbpass oracle_instance pg_database pg_host
-" unless scalar(@ARGV) >= 7;
+Usage: migrateUserdbToPostgres user|account sourcecode_dir workspace_dir dbuser dbpass oracle_instance pg_database pg_host [createSchemas]
+" unless scalar(@ARGV) >= 8;
 
-# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda
+# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda, service-dataset-access, OAuth2Server
 
 my @sourceSchemas = ('userlogins5', 'announce', 'metrics', 'uploads', 'edauser');
 
@@ -46,7 +46,23 @@ my $targetSchemas = {
 	       'edauser' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/us/postgres/createDbSchema.sql",
 			      'tablesToKeep' => ['USERS', 'ANALYSIS']
                             }
-	      };
+		    };
+
+if ($userOrAccount eq 'account') {
+  my @sourceSchemas = ('studyaccess', 'useraccounts');
+
+  my $targetSchemas = {
+	       'studyaccess' => { 'ddlFile' => "service-dataset-access/ddl/postgres-schema.sql",
+			      'sourceSchema' => 'studyaccess',
+			      'tablesToKeep' => ['APPROVAL_STATUS', 'RESTRICTION_LEVEL', 'STAFF', 'PROVIDERS', 'END_USERS', 'END_USER_HISTORY'],
+			    },
+	       'useraccounts' => { 'ddlFile' => "OAuth2Server/EuPathDB/data/data/create_useraccounts_schema_postgres.sql",
+			      'sourceSchema' => 'useraccounts',
+			      'tablesToKeep' => ['ACCOUNTS', 'ACCOUNT_PROPERTIES', 'GUEST_IDS', 'SUBSCRIPTIONS', 'INVOICES', 'SUBSCRIPTION_GROUPS', 'SUBSCRIPTION_GROUP_LEADS' ],
+			    }
+
+		      };
+}
 
 # confirm that the needed repos are checked out
 foreach my $schemaName (keys %$targetSchemas) {
