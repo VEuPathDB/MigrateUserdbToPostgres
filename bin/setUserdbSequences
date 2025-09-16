@@ -6,7 +6,7 @@ my ($nOrs, $dbuser, $dbpass, $pgDatabase, $pgHost, $doit) = @ARGV;
 
 die "
 Usage: setUserdbSequences n|s dbuser dbpass dbname dbnost [doit]
-" unless scalar(@ARGV) > 5;
+" unless scalar(@ARGV) >= 5;
 
 my $pgDsn = "dbi:Pg:dbname=$pgDatabase;host=$pgHost;port=5432";
 my $dbh = DBI->connect($pgDsn, $dbuser, $dbpass,
@@ -23,7 +23,7 @@ my @sequences = (
   { schema => 'wdkuser',     table => 'dataset_values',        sequence => 'dataset_values_pkseq',           grant_select => ['COMM_WDK_W'], id=>'dataset_value_id'},
   { schema => 'wdkuser',     table => 'strategies',            sequence => 'strategies_pkseq',               grant_select => ['COMM_WDK_W'], id=>'strategy_id'},
   { schema => 'wdkuser',     table => 'steps',                 sequence => 'steps_pkseq',                    grant_select => ['COMM_WDK_W'], id=>'step_id'},
-  { schema => 'wdkuser',     table => 'step_analysis',         sequence => 'step_analysis_pkseq',            grant_select => ['COMM_WDK_W'], id=>'step_analysis_id'},
+  { schema => 'wdkuser',     table => 'step_analysis',         sequence => 'step_analysis_pkseq',            grant_select => ['COMM_WDK_W'], id=>'analysis_id'},
   { schema => 'usercomments', table => 'comments',             sequence => 'comments_pkseq',                 grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_id'},
   { schema => 'usercomments', table => 'commentfile',          sequence => 'commentfile_pkseq',              grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'file_id'},
   { schema => 'usercomments', table => 'commentreference',     sequence => 'commentreference_pkseq',         grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_reference_id'},
@@ -41,18 +41,18 @@ foreach my $seq (@sequences) {
   $stmt->execute();
   my ($max) = $stmt->fetchrow_array();
   my $start = $max + 10;
-  print STDERR "$seq->{table} $max";
-  dbh_do("drop SEQUENCE if exists $seq->{shema}.$seq->{sequence}");
-  dbh_do("CREATE SEQUENCE $seq->{shema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
-  my $grants = $seq->{grants};
+  print STDERR "$seq->{table} $max\n";
+  dbh_do("drop SEQUENCE if exists $seq->{schema}.$seq->{sequence}");
+  dbh_do("CREATE SEQUENCE $seq->{schema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
+  my $grants = $seq->{grant_select};
   foreach my $grant (@$grants) {
-    dbh_do("GRANT SELECT ON $seq->{shema}.$seq->{sequence} TO $grant");
+    dbh_do("GRANT SELECT ON $seq->{schema}.$seq->{sequence} TO $grant");
   }
 }
 
 sub dbh_do {
   my ($sql) = @_;
-  if (!$doit) {
+  if ($doit) {
     $dbh->do($sql);
   }
   print STDERR $sql . "\n";
