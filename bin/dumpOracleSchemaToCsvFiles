@@ -16,6 +16,7 @@ my ($instance, $dbuser, $dbpass, $target_schema) = @ARGV;
 
 # Build DSN
 my $dsn = "dbi:Oracle:$instance";
+$ENV{'NLS_LANG'} = ".AL32UTF8";
 
 # Connect to Oracle
 my $dbh = DBI->connect($dsn, $dbuser, $dbpass, {
@@ -65,6 +66,8 @@ while (my ($table_name) = $table_sth->fetchrow_array) {
     $sql = "select strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public from $target_schema.strategies where root_step_id in (select step_id from $target_schema.steps)";
   } elsif ($table_name eq "STEP_ANALYSIS") {
     $sql = "select analysis_id, step_id, display_name, user_notes, is_new as revision_status, has_params, invalid_step_reason, context_hash, context, properties from $target_schema.step_analysis";
+  } elsif ($table_name eq "ACCOUNT_PROPERTIES") {
+    $sql = "select user_id, key, value from $target_schema.account_properties where user_id in (select user_id from $target_schema.accounts)";
   } 
 #  else { next; }
 
@@ -79,9 +82,10 @@ while (my ($table_name) = $table_sth->fetchrow_array) {
 #    my $data_sth = $dbh->prepare($sql);
 #    $data_sth->execute();
 
-
     # Open file
-    open my $fh, '>', "$table_name.csv" or die "Cannot open $table_name.csv: $!";
+    open my $fh, ">:utf8", "$table_name.csv" or die "Cannot open $table_name.csv: $!";
+
+    binmode(STDOUT, ":utf8");
 
     # Print header
     print $fh join(",", map { "$_" } @columns), "\n";

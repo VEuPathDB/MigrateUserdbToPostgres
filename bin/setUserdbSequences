@@ -2,11 +2,14 @@
 use strict;
 use DBI;
 
-my ($nOrs, $dbuser, $dbpass, $pgDatabase, $pgHost, $doit) = @ARGV;
+my ($userOrAcct, $nOrs, $dbuser, $dbpass, $pgDatabase, $pgHost, $doit) = @ARGV;
 
 die "
-Usage: setUserdbSequences n|s dbuser dbpass dbname dbnost [doit]
-" unless scalar(@ARGV) >= 5;
+Usage: setUserdbSequences user|account n|s dbuser dbpass dbname dbnost [doit]
+" unless scalar(@ARGV) >= 6;
+
+die "Invalid nOrs: '$nOrs'\n" unless $nOrs eq 'n' || $nOrs eq 's';
+die "Invalid userOrAcct: '$userOrAcct'\n" unless $userOrAcct eq 'user' || $userOrAcct eq 'account';
 
 my $pgDsn = "dbi:Pg:dbname=$pgDatabase;host=$pgHost;port=5432";
 my $dbh = DBI->connect($pgDsn, $dbuser, $dbpass,
@@ -33,6 +36,17 @@ my @sequences = (
   { schema => 'usercomments', table => 'external_databases',   sequence => 'external_databases_pkseq',       grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'external_database_id'},
   { schema => 'usercomments', table => 'locations',            sequence => 'locations_pkseq',                grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'location_id'}
 );
+
+if ($userOrAcct eq 'account') {
+  @sequences = (
+  { schema => 'useraccounts',    table => 'accounts',              sequence => 'ACCOUNTS_PKSEQ',              grant_select => ['useraccts_r', 'useraccts_w'], id=>'user_id'},
+  { schema => 'useraccounts',    table => 'subscriptions',              sequence => 'subscriptions_pkseq',              grant_select => ['useraccts_r'], id=>'subscription_id'},
+  { schema => 'useraccounts',    table => 'subscription_groups',       sequence => 'subscription_groups_pkseq',        grant_select => ['useraccts_r'], id=>'group_id'},
+#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
+#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
+#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
+               );
+}
 
 my $remain = $nOrs eq 'n'? 0 : 3;
 
