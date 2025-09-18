@@ -58,7 +58,7 @@ if ($userOrAccount eq 'account') {
 			      'sourceSchema' => 'studyaccess',
 			      'tablesToKeep' => ['STAFF', 'PROVIDERS', 'END_USERS', 'END_USER_HISTORY'],
 			    },
-	       'useraccounts' => { 'ddlFile' => "OAuth2Server/EuPathDB/data/create_useraccounts_schema_postgres.sql",
+	       'useraccounts' => { 'ddlFile' => "OAuth2Server/EuPathDB/data/create_schema_postgres.sql",
 			      'sourceSchema' => 'useraccounts',
 			      'tablesToKeep' => ['ACCOUNTS', 'ACCOUNT_PROPERTIES', 'GUEST_IDS', 'SUBSCRIPTIONS', 'INVOICES', 'SUBSCRIPTION_GROUPS', 'SUBSCRIPTION_GROUP_LEADS' ],
 			    }
