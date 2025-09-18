@@ -42,7 +42,6 @@ if ($userOrAcct eq 'account') {
   { schema => 'useraccounts',    table => 'accounts',              sequence => 'ACCOUNTS_PKSEQ',              grant_select => ['useraccts_r', 'useraccts_w'], id=>'user_id'},
   { schema => 'useraccounts',    table => 'subscriptions',              sequence => 'subscriptions_pkseq',              grant_select => ['useraccts_r'], id=>'subscription_id'},
   { schema => 'useraccounts',    table => 'subscription_groups',       sequence => 'subscription_groups_pkseq',        grant_select => ['useraccts_r'], id=>'group_id'},
-  { schema => 'studyaccess',    table => 'restriction_level',              sequence => 'restriction_level_restriction_level_id_seq',              grant_select => [''], id=>'restriction_level_id'},
   { schema => 'studyaccess',    table => 'staff',              sequence => 'staff_staff_id_seq',              grant_select => [''], id=>'staff_id'},
   { schema => 'studyaccess',    table => 'providers',              sequence => 'providers_provider_id_seq',              grant_select => [''], id=>'provider_id'},
   { schema => 'studyaccess',    table => 'end_users',              sequence => 'end_users_end_user_id_seq',              grant_select => [''], id=>'end_user_id'},
