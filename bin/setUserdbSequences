@@ -42,9 +42,10 @@ if ($userOrAcct eq 'account') {
   { schema => 'useraccounts',    table => 'accounts',              sequence => 'ACCOUNTS_PKSEQ',              grant_select => ['useraccts_r', 'useraccts_w'], id=>'user_id'},
   { schema => 'useraccounts',    table => 'subscriptions',              sequence => 'subscriptions_pkseq',              grant_select => ['useraccts_r'], id=>'subscription_id'},
   { schema => 'useraccounts',    table => 'subscription_groups',       sequence => 'subscription_groups_pkseq',        grant_select => ['useraccts_r'], id=>'group_id'},
-#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
-#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
-#  { schema => '',    table => '',              sequence => '',              grant_select => [''], id=>''},
+  { schema => 'studyaccess',    table => 'restriction_level',              sequence => 'restriction_level_restriction_level_id_seq',              grant_select => [''], id=>'restriction_level_id'},
+  { schema => 'studyaccess',    table => 'staff',              sequence => 'staff_staff_id_seq',              grant_select => [''], id=>'staff_id'},
+  { schema => 'studyaccess',    table => 'providers',              sequence => 'providers_provider_id_seq',              grant_select => [''], id=>'provider_id'},
+  { schema => 'studyaccess',    table => 'end_users',              sequence => 'end_users_end_user_id_seq',              grant_select => [''], id=>'end_user_id'},
                );
 }
 
@@ -56,12 +57,7 @@ foreach my $seq (@sequences) {
   my ($max) = $stmt->fetchrow_array();
   my $start = $max + 10;
   print STDERR "$seq->{table} $max\n";
-  dbh_do("drop SEQUENCE if exists $seq->{schema}.$seq->{sequence}");
-  dbh_do("CREATE SEQUENCE $seq->{schema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
-  my $grants = $seq->{grant_select};
-  foreach my $grant (@$grants) {
-    dbh_do("GRANT SELECT ON $seq->{schema}.$seq->{sequence} TO $grant");
-  }
+  dbh_do("ALTER SEQUENCE $seq->{schema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
 }
 
 sub dbh_do {

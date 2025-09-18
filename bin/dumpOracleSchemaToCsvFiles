@@ -113,5 +113,6 @@ sub escape {
     $val =~ s/\x00//g;   # remove null ascii characters that break pg COPY
     $val =~ s/`/``/g;        # Escape backticks
     $val =~ s/\r?\n/ /g;     # Remove newlines
+    $val =~ s/\x{FFFF}//g;  # remove unicode noncharacter
     return $val;
 }

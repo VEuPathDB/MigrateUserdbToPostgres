@@ -56,7 +56,7 @@ if ($userOrAccount eq 'account') {
   $targetSchemas = {
 	       'studyaccess' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/access-service/postgres/createSchema.sql",
 			      'sourceSchema' => 'studyaccess',
-			      'tablesToKeep' => ['APPROVAL_STATUS', 'RESTRICTION_LEVEL', 'STAFF', 'PROVIDERS', 'END_USERS', 'END_USER_HISTORY'],
+			      'tablesToKeep' => ['STAFF', 'PROVIDERS', 'END_USERS', 'END_USER_HISTORY'],
 			    },
 	       'useraccounts' => { 'ddlFile' => "OAuth2Server/EuPathDB/data/create_useraccounts_schema_postgres.sql",
 			      'sourceSchema' => 'useraccounts',
