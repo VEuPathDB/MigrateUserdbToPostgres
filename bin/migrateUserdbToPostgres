@@ -117,7 +117,7 @@ if ($createSchemas) {
   `rm -r $workspaceDir/load`;
   foreach my $schemaName (keys %$targetSchemas) {
     my $logFile = "$workspaceDir/logs/$schemaName";
-  
+
     # drop old schema
     $pgDbh->do("drop schema if exists $schemaName cascade");
 
