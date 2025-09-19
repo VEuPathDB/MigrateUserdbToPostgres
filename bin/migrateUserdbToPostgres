@@ -17,7 +17,7 @@ Usage: migrateUserdbToPostgres user|account sourcecode_dir workspace_dir dbuser 
 
 die "First arg must be 'account' or 'user'\n" unless $userOrAccount eq 'account' || $userOrAccount eq 'user';
 
-# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda, service-dataset-access, OAuth2Server
+# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda, OAuth2Server
 
 my @sourceSchemas = ('userlogins5', 'announce', 'metrics', 'uploads', 'edauser');
 
