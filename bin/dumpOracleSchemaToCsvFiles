@@ -1,0 +1,118 @@
+#!/usr/bin/perl
+use strict;
+#use warnings;
+use DBI;
+use Scalar::Util qw(looks_like_number);
+
+# Discover the tables in the provided target_schema.  Dump each table to a tablename.csv file, including a header with column names.
+# Use backtick as field delimiter.  Escape backticks in the data.
+
+# Check command-line arguments
+if (@ARGV != 4) {
+    die "Usage: $0 <dbinstance> <user> <passwd> <target_schema>\n";
+  }
+
+my ($instance, $dbuser, $dbpass, $target_schema) = @ARGV;
+
+# Build DSN
+my $dsn = "dbi:Oracle:$instance";
+$ENV{'NLS_LANG'} = ".AL32UTF8";
+
+# Connect to Oracle
+my $dbh = DBI->connect($dsn, $dbuser, $dbpass, {
+    RaiseError => 1,
+    AutoCommit => 0,
+    LongReadLen => 50000000,
+                                               }) or die $DBI::errstr;
+
+
+$dbh->do("ALTER SESSION SET NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD HH24:MI:SS'") || die "FAILED";
+$dbh->do("ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT = 'YYYY-MM-DD HH24:MI:SS TZH:TZM'") || die "FAILED";
+
+# Get table names
+my $table_sth = $dbh->prepare("
+    SELECT table_name FROM all_tables WHERE owner = UPPER(?) ORDER BY table_name
+
+
+");
+$table_sth->execute($target_schema);
+
+while (my ($table_name) = $table_sth->fetchrow_array) {
+#  next if $table_name eq 'DATASET_VALUES';
+
+  if (-e "$table_name.csv") {
+    print "Found file: $table_name.csv\n";
+    next;
+  }
+  print "Exporting table: $table_name\n";
+
+  my $sql = "SELECT * FROM $target_schema.$table_name";
+
+  if ($table_name eq "DATASETS") {
+    $sql = "SELECT DATASET_ID, USER_ID,DATASET_NAME,DATASET_SIZE,CONTENT_CHECKSUM,CREATED_TIME,UPLOAD_FILE,PARSER from $target_schema.datasets";
+  } elsif ($table_name eq "USER_BASKETS") {
+    $sql = "select basket_id, user_id, basket_name, project_id, record_class, pk_column_1, pk_column_2, pk_column_3 from $target_schema.user_baskets";
+  } elsif ($table_name eq "FAVORITES") {
+    $sql = "select favorite_id, user_id, project_id, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted from $target_schema.favorites";
+  } elsif ($table_name eq "EXTERNAL_DATABASES") {
+    $sql = "select external_database_id, external_database_name, external_database_version  from $target_schema.external_databases";
+  } elsif ($table_name eq "LOCATIONS") {
+    $sql = "select comment_id, location_id, location_start, location_end, coordinate_type, is_reverse from $target_schema.locations";
+  } elsif ($table_name eq "DATASET_VALUES") {
+    $sql = "select dataset_value_id, dataset_id, dataset_value_order, data1, data2, data3, data4, data5, data6, data7 from $target_schema.dataset_values";
+  } elsif ($table_name eq "STEPS") {
+    $sql = "select step_id, user_id, left_child_id, right_child_id, create_time, last_run_time, estimate_size, custom_name, is_deleted, is_valid, collapsed_name, is_collapsible, assigned_weight, project_id, project_version, question_name, strategy_id, display_params, display_prefs, branch_is_expanded, branch_name from $target_schema.steps";
+  } elsif ($table_name eq "STRATEGIES") {
+    $sql = "select strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public from $target_schema.strategies where root_step_id in (select step_id from $target_schema.steps)";
+  } elsif ($table_name eq "STEP_ANALYSIS") {
+    $sql = "select analysis_id, step_id, display_name, user_notes, is_new as revision_status, has_params, invalid_step_reason, context_hash, context, properties from $target_schema.step_analysis";
+  } elsif ($table_name eq "ACCOUNT_PROPERTIES") {
+    $sql = "select user_id, key, value from $target_schema.account_properties where user_id in (select user_id from $target_schema.accounts)";
+  } 
+#  else { next; }
+
+    my $data_sth = $dbh->prepare($sql);
+    $data_sth->execute();
+
+    # Column names
+    my @columns = @{$data_sth->{NAME}};
+
+#    my $colsStr = join(", ", @columns);
+#    my $sql = "SELECT $colsStr FROM $target_schema.$table_name";
+#    my $data_sth = $dbh->prepare($sql);
+#    $data_sth->execute();
+
+    # Open file
+    open my $fh, ">:utf8", "$table_name.csv" or die "Cannot open $table_name.csv: $!";
+
+    binmode(STDOUT, ":utf8");
+
+    # Print header
+    print $fh join(",", map { "$_" } @columns), "\n";
+
+    # Print rows
+    while (my $row = $data_sth->fetchrow_arrayref) {
+        my @escaped = map {
+          looks_like_number($_)? $_ : (defined $_ ? "`" . escape($_) . "`" : '')
+        } @$row;
+        print $fh join(",", @escaped), "\n";
+      }
+
+    close $fh;
+    $data_sth->finish;
+  }
+
+$table_sth->finish;
+$dbh->disconnect;
+
+print "All tables exported successfully.\n";
+
+# Escape backticks and commas (basic)
+sub escape {
+    my $val = shift;
+    $val =~ s/\x00//g;   # remove null ascii characters that break pg COPY
+    $val =~ s/`/``/g;        # Escape backticks
+    $val =~ s/\r?\n/ /g;     # Remove newlines
+    $val =~ s/\x{FFFF}//g;  # remove unicode noncharacter
+    return $val;
+}

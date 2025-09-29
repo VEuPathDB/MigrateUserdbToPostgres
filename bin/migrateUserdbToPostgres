@@ -1,0 +1,243 @@
+#!/usr/bin/perl
+use strict;
+use DBI;
+use File::Copy;
+use FindBin;
+use File::Spec;
+use File::Basename;
+use FindBin;
+use lib "$FindBin::Bin/../lib/perl";
+use ApiCommonData::Load::Psql;
+
+my ($userOrAccount, $sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
+
+die "
+Usage: migrateUserdbToPostgres user|account sourcecode_dir workspace_dir dbuser dbpass oracle_instance pg_database pg_host [createSchemas]
+" unless scalar(@ARGV) >= 8;
+
+die "First arg must be 'account' or 'user'\n" unless $userOrAccount eq 'account' || $userOrAccount eq 'user';
+
+# clone these repos into $sourceCodeDir:  WDK, MetricReports, ApiCommonData, service-multi-blast, service-eda, OAuth2Server
+
+my @sourceSchemas = ('userlogins5', 'announce', 'metrics', 'uploads', 'edauser');
+
+my $targetSchemas = {
+	       'wdkuser' => { 'ddlFile' => "WDK/Model/data/create_schema_wdkuser_postgres.sql",
+			      'sourceSchema' => 'userlogins5',
+			      'tablesToKeep' => ['USERS', 'PREFERENCES', 'USER_BASKETS', 'FAVORITES',
+                                                 'DATASETS', 'DATASET_VALUES',
+                                                 'STEPS', 'STRATEGIES', 'STEP_ANALYSIS'],
+			    },
+	       'usercomments' => { 'ddlFile' => "ApiCommonData/Load/lib/sql/comments/psql/createCommentTables.sql",
+				   'sourceSchema' => 'userlogins5',
+				   'tablesToKeep' => ['COMMENTS', 'COMMENTFILE', 'COMMENTREFERENCE', 'COMMENTSEQUENCE', 'COMMENTSTABLEID', 'COMMENTTARGETCATEGORY', 'EXTERNAL_DATABASES', 'COMMENT_EXTERNAL_DATABASE', 'LOCATIONS', 'COMMENT_USERS'],
+				  },
+	       'announce' => { 'ddlFile' => "WDK/Model/data/create_schema_announce_postgres.sql",
+			      'tablesToKeep' => ['MESSAGES', 'MESSAGE_PROJECTS']
+                             },
+	       'metrics' => { 'ddlFile' => "MetricsReports/usage/lib/sql/create_metrics_schema_postgres.sql",
+			      'tablesToKeep' => ['GENEPAGETABLESTATS', 'RECORDPAGEVIEWSTATS', 'STEPSPERORGANISM', 'ORGANISMSPERSTEP', 'ORGANISMVIEWSTATS', 'SEARCHESSTATS', 'TOOLSSTATS', 'AWSTATS', 'LOGINSTATS', 'PAGEVIEWSTATS', 'USERDATASETSSTATS']
+                            },
+	       'uploads' => { 'ddlFile' => "WDK/Model/data/create_schema_uploads_postgres.sql",
+			      'tablesToKeep' => ['USERFILE']
+                            },
+	       'multiblast' => { 'ddlFile' => "service-multi-blast/databases/wdk/user-tables-postgres.sql",
+                               'sourceSchema' => 'userlogins5',
+			      'tablesToKeep' => ['MULTIBLAST_JOBS', 'MULTIBLAST_JOB_TO_TARGETS', 'MULTIBLAST_JOB_TO_JOBS', 'MULTIBLAST_USERS', 'MULTIBLAST_FMT_JOBS', 'MULTIBLAST_USERS_TO_FMT_JOBS'],
+                               },
+	       'edauser' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/us/postgres/createDbSchema.sql",
+			      'tablesToKeep' => ['USERS', 'ANALYSIS']
+                            }
+		    };
+
+if ($userOrAccount eq 'account') {
+  @sourceSchemas = ('studyaccess', 'useraccounts');
+
+  $targetSchemas = {
+	       'studyaccess' => { 'ddlFile' => "service-eda/src/main/resources/org/veupathdb/service/eda/access-service/postgres/createSchema.sql",
+			      'sourceSchema' => 'studyaccess',
+			      'tablesToKeep' => ['STAFF', 'PROVIDERS', 'END_USERS', 'END_USER_HISTORY'],
+			    },
+	       'useraccounts' => { 'ddlFile' => "OAuth2Server/EuPathDB/data/create_schema_postgres.sql",
+			      'sourceSchema' => 'useraccounts',
+			      'tablesToKeep' => ['ACCOUNTS', 'ACCOUNT_PROPERTIES', 'GUEST_IDS', 'SUBSCRIPTIONS', 'INVOICES', 'SUBSCRIPTION_GROUPS', 'SUBSCRIPTION_GROUP_LEADS' ],
+			    }
+
+		      };
+}
+
+
+# confirm that the needed repos are checked out
+foreach my $schemaName (keys %$targetSchemas) {
+  my $ddlFile = "$sourceCodeDir/" . $targetSchemas->{$schemaName}->{ddlFile};
+  die "DDL file $ddlFile does not exist\n" unless -e $ddlFile;
+}
+
+# dump oracle schemas to csv files
+unless (-e $workspaceDir) { mkdir "$workspaceDir" || die "Failed creating dir $workspaceDir\n"; }
+unless (-e "$workspaceDir/dump") {mkdir "$workspaceDir/dump" || die "Failed creating dir $workspaceDir/dump\n"; }
+foreach my $sourceSchema (@sourceSchemas) {
+  print STDERR "Dumping $sourceSchema\n";
+  unless (-e "$workspaceDir/dump/$sourceSchema") { mkdir "$workspaceDir/dump/$sourceSchema" || die "Failed creating dir $workspaceDir/dump/$sourceSchema\n"; }
+  chdir "$workspaceDir/dump/$sourceSchema" || die "Failed chdir $workspaceDir/dump/$sourceSchema\n";
+  my $cmd = "$FindBin::Bin/dumpOracleSchemaToCsvFiles $oracleInstance $dbuser $dbpass $sourceSchema";
+  if (system("$cmd")) {
+    print STDERR ">>> execution failed: $!\n\n";
+
+    $cmd =~ s/\Q$dbpass/******/gi;
+    print STDERR ">>> failed command: $cmd\n\n";
+    die;
+  }
+}
+
+# create cleaned files
+`rm -r $workspaceDir/clean`;
+mkdir "$workspaceDir/clean" || die "Failed creating dir $workspaceDir/clean\n";
+foreach my $targetSchema (keys %$targetSchemas) {
+  my $sourceSchema = $targetSchemas->{$targetSchema}->{sourceSchema}?
+    $targetSchemas->{$targetSchema}->{sourceSchema} :
+    $targetSchema;
+  my $tablesToKeep = $targetSchemas->{$targetSchema}->{tablesToKeep};
+  mkdir "$workspaceDir/clean/$targetSchema";
+  foreach my $table (@$tablesToKeep) {
+    my $cmd = "ln -s $workspaceDir/dump/$sourceSchema/$table.csv $workspaceDir/clean/$targetSchema/$table.csv";
+    if (-e "$workspaceDir/dump/$sourceSchema/$table.csv") {
+      system($cmd) && die "Failed running '$cmd': $!\n";
+    }
+  }
+}
+
+my $pgDsn = "dbi:Pg:dbname=$pgDatabase;host=$pgHost;port=5432";
+my $pgDbh = DBI->connect($pgDsn, $dbuser, $dbpass, {
+						    RaiseError => 1}) or die $DBI::errstr;
+
+mkdir "$workspaceDir/logs" || die "Can't mkdir $workspaceDir/logs\n";
+
+if ($createSchemas) {
+  `rm -r $workspaceDir/load`;
+  foreach my $schemaName (keys %$targetSchemas) {
+    my $logFile = "$workspaceDir/logs/$schemaName";
+
+    # drop old schema
+    $pgDbh->do("drop schema if exists $schemaName cascade");
+
+    # create new schema
+    my $ddlFile = $targetSchemas->{$schemaName}->{ddlFile};
+    my $cmd = getPsqlCommandLine("$sourceCodeDir/$ddlFile", $logFile, $dbuser, $dbpass, $pgDatabase, $pgHost);
+    runPsqlCmd($cmd, $logFile, $dbpass);
+  }
+}
+
+loadCsvFiles($workspaceDir, $targetSchemas, "$workspaceDir/clean", "$workspaceDir/logs", $dbuser, $dbpass, $pgDatabase, $pgHost, $pgDbh);
+
+print STDERR "Migration done.\n";
+
+########################################################################################
+
+
+sub getPsqlCommandLine {
+  my ($filename, $logfile, $login, $password, $database, $hostname) = @_;
+
+  my $connectionString = "postgresql://$login:$password\@$hostname/$database";
+
+  # Temporarily remove --echo-errors as it is not supported in older psql versions
+  # return "psql --echo-all --echo-errors --log-file='$logFileName' --command='$copyCommand' $connectionString $quiet"
+  return "psql --echo-all --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
+#  return "psql --log-file='$logfile' --file=$filename $connectionString -v ON_ERROR_STOP=on"
+}
+
+sub runPsqlCmd {
+  my ($cmdLine, $logFileName, $dbPassword) = @_;
+
+  if (system("$cmdLine")) {
+    print STDERR ">>> psql execution failed: $!\n\n";
+
+    $cmdLine =~ s/\Q$dbPassword/******/gi;
+    print STDERR ">>> psql failed command: $cmdLine\n\n";
+
+    printFileToStdErr($logFileName, "psql");
+    die;
+  }
+}
+
+sub printFileToStdErr {
+  my ($fileName, $descrip) = @_;
+
+  return unless -f $fileName;
+
+  print STDERR ">>> $descrip $fileName file content\n\n";
+
+  open(LF, $fileName);
+  while (my $line = <LF>) {
+    print STDERR "$line";
+  }
+  close(LF);
+}
+
+sub bulkLoadTablePostgres {
+  my ($schema, $tableName, $csvFile, $logDir, $dbuser, $dbpass, $dbname, $dbhost) = @_;
+
+  my $psqlObj = ApiCommonData::Load::Psql->new({_login => $dbuser,
+                                             _password => $dbpass,
+                                             _database => $dbname,
+                                             _hostName => $dbhost,
+                                             _quiet => 0,
+                                             _infile_name => $csvFile,
+                                            });
+  $psqlObj->setNullValue('');
+  $psqlObj->setFieldDelimiter(',');
+
+  my $logFileName = "$logDir/" . $tableName . '.log';
+  $psqlObj->setLogFileName($logFileName);
+
+  open my $fh, '<', $csvFile or die "Cannot open file '$csvFile': $!";
+  my $headerLine = <$fh>;
+  close $fh;
+
+  $headerLine =~ s/`//g;
+  my @fields = split(/,/, $headerLine);
+
+  $psqlObj->setFields(\@fields);
+
+  $psqlObj->setTableName("$schema.$tableName");
+  my $cmdLine = $psqlObj->getCommandLine();
+
+  if (system("$cmdLine")) {
+    print STDERR ">>> psql execution failed: $!\n\n";
+
+    $cmdLine =~ s/\Q$dbpass/******/gi;
+    print STDERR ">>> psql failed command: $cmdLine\n\n";
+
+    printFileToStdErr($logFileName, "psql");
+    die;
+  }
+}
+
+sub loadCsvFiles {
+  my ($workspaceDir, $targetSchemas, $cleanDir, $logDir, $dbuser, $dbpass, $dbname, $dbhost, $pgDbh) = @_;
+
+  unless (-e "$workspaceDir/load") { mkdir "$workspaceDir/load" || die "Failed mkdir $workspaceDir/load \n"; }
+
+  # Loop through schemas in dump dir
+  foreach my $schemaName (keys %$targetSchemas) {
+    print STDERR "Loading schema: $schemaName\n";
+
+    unless (-e "$workspaceDir/load/$schemaName") { mkdir "$workspaceDir/load/$schemaName" || die "Failed mkdir $workspaceDir/load/$schemaName \n"; }
+
+    my $tablesToKeep = $targetSchemas->{$schemaName}->{tablesToKeep};
+    foreach my $tableName (@$tablesToKeep) {
+      if (-e "$workspaceDir/load/$schemaName/$tableName") {
+        print STDERR "Found load file for $tableName\n";
+        next;
+      }
+      my $filepath = "$cleanDir/$schemaName/$tableName.csv";
+      next unless -e $filepath;
+      print STDERR "=== $tableName ===\n";
+      my $startTime = time;
+      bulkLoadTablePostgres($schemaName, $tableName, $filepath, $logDir, $dbuser, $dbpass, $dbname, $dbhost);
+      print STDERR "  done: " . (time - $startTime) . "s\n\n";
+      `touch $workspaceDir/load/$schemaName/$tableName`;
+    }
+  }
+
+}

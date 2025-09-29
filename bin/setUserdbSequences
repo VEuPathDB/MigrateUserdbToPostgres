@@ -1,0 +1,141 @@
+#!/usr/bin/perl
+use strict;
+use DBI;
+
+my ($userOrAcct, $nOrs, $dbuser, $dbpass, $pgDatabase, $pgHost, $doit) = @ARGV;
+
+die "
+Usage: setUserdbSequences user|account n|s dbuser dbpass dbname dbnost [doit]
+" unless scalar(@ARGV) >= 6;
+
+die "Invalid nOrs: '$nOrs'\n" unless $nOrs eq 'n' || $nOrs eq 's';
+die "Invalid userOrAcct: '$userOrAcct'\n" unless $userOrAcct eq 'user' || $userOrAcct eq 'account';
+
+my $pgDsn = "dbi:Pg:dbname=$pgDatabase;host=$pgHost;port=5432";
+my $dbh = DBI->connect($pgDsn, $dbuser, $dbpass,
+			 {RaiseError => 1}) or die $DBI::errstr;
+
+my @sequences = (
+  { schema => 'announce',    table => 'projects',              sequence => 'projects_id_pkseq',              grant_select => ['COMM_WDK_W'], id=>'project_id'},
+  { schema => 'announce',    table => 'category',              sequence => 'category_id_pkseq',              grant_select => ['COMM_WDK_W'], id=>'category_id'},
+  { schema => 'announce',    table => 'messages',              sequence => 'messages_id_pkseq',              grant_select => ['COMM_WDK_W'], id=>'message_id'},
+  { schema => 'uploads',     table => 'userfile',              sequence => 'userfile_pkseq',                 grant_select => ['COMM_WDK_W'], id=>'userfileid'},
+  { schema => 'wdkuser',     table => 'user_baskets',          sequence => 'user_baskets_pkseq',             grant_select => ['COMM_WDK_W'], id=>'basket_id'},
+  { schema => 'wdkuser',     table => 'favorites',             sequence => 'favorites_pkseq',                grant_select => ['COMM_WDK_W'], id=>'favorite_id'},
+  { schema => 'wdkuser',     table => 'datasets',              sequence => 'datasets_pkseq',                 grant_select => ['COMM_WDK_W'], id=>'dataset_id'},
+  { schema => 'wdkuser',     table => 'dataset_values',        sequence => 'dataset_values_pkseq',           grant_select => ['COMM_WDK_W'], id=>'dataset_value_id'},
+  { schema => 'wdkuser',     table => 'strategies',            sequence => 'strategies_pkseq',               grant_select => ['COMM_WDK_W'], id=>'strategy_id'},
+  { schema => 'wdkuser',     table => 'steps',                 sequence => 'steps_pkseq',                    grant_select => ['COMM_WDK_W'], id=>'step_id'},
+  { schema => 'wdkuser',     table => 'step_analysis',         sequence => 'step_analysis_pkseq',            grant_select => ['COMM_WDK_W'], id=>'analysis_id'},
+  { schema => 'usercomments', table => 'comments',             sequence => 'comments_pkseq',                 grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_id'},
+  { schema => 'usercomments', table => 'commentfile',          sequence => 'commentfile_pkseq',              grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'file_id'},
+  { schema => 'usercomments', table => 'commentreference',     sequence => 'commentreference_pkseq',         grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_reference_id'},
+  { schema => 'usercomments', table => 'commentsequence',      sequence => 'commentsequence_pkseq',          grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_sequence_id'},
+  { schema => 'usercomments', table => 'commentstableid',      sequence => 'commentstableid_pkseq',          grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_stable_id'},
+  { schema => 'usercomments', table => 'commenttargetcategory',sequence => 'commenttargetcategory_pkseq',    grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'comment_target_category_id'},
+  { schema => 'usercomments', table => 'external_databases',   sequence => 'external_databases_pkseq',       grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'external_database_id'},
+  { schema => 'usercomments', table => 'locations',            sequence => 'locations_pkseq',                grant_select => ['COMM_WDK_W', 'GUS_R'], id=>'location_id'}
+);
+
+if ($userOrAcct eq 'account') {
+  @sequences = (
+  { schema => 'useraccounts',    table => 'accounts',              sequence => 'ACCOUNTS_PKSEQ',              grant_select => ['useraccts_r', 'useraccts_w'], id=>'user_id'},
+  { schema => 'useraccounts',    table => 'subscriptions',              sequence => 'subscriptions_pkseq',              grant_select => ['useraccts_r'], id=>'subscription_id'},
+  { schema => 'useraccounts',    table => 'subscription_groups',       sequence => 'subscription_groups_pkseq',        grant_select => ['useraccts_r'], id=>'group_id'},
+  { schema => 'studyaccess',    table => 'staff',              sequence => 'staff_staff_id_seq',              grant_select => [''], id=>'staff_id'},
+  { schema => 'studyaccess',    table => 'providers',              sequence => 'providers_provider_id_seq',              grant_select => [''], id=>'provider_id'},
+  { schema => 'studyaccess',    table => 'end_users',              sequence => 'end_users_end_user_id_seq',              grant_select => [''], id=>'end_user_id'},
+               );
+}
+
+my $remain = $nOrs eq 'n'? 0 : 3;
+
+foreach my $seq (@sequences) {
+  my $stmt = $dbh->prepare("select max($seq->{id}) from $seq->{schema}.$seq->{table} where $seq->{id} % 10 = $remain");
+  $stmt->execute();
+  my ($max) = $stmt->fetchrow_array();
+  my $start = $max + 10;
+  print STDERR "$seq->{table} $max\n";
+  dbh_do("ALTER SEQUENCE $seq->{schema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
+  dbh_do("ALTER SEQUENCE $seq->{schema}.$seq->{sequence} RESTART");
+}
+
+sub dbh_do {
+  my ($sql) = @_;
+  if ($doit) {
+    $dbh->do($sql);
+    print STDERR "executing: ";
+  }
+  print STDERR $sql . "\n";
+}
+
+=pod
+
+CREATE SEQUENCE announce.projects_id_pkseq INCREMENT BY 10 START WITH 100;
+GRANT SELECT ON announce.projects_id_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE announce.category_id_pkseq INCREMENT BY 10 START WITH 40;
+GRANT SELECT ON announce.category_id_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE announce.messages_id_pkseq INCREMENT BY 10 START WITH 10;
+GRANT SELECT ON announce.messages_id_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE uploads.userfile_pkseq INCREMENT BY 10 START WITH 100;
+GRANT SELECT ON uploads.userfile_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.user_baskets_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.user_baskets_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.favorites_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.favorites_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.datasets_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.datasets_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.dataset_values_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.dataset_values_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.strategies_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.strategies_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.steps_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.steps_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE wdkuser.step_analysis_pkseq INCREMENT BY 10; -- START WITH 100000000;
+GRANT SELECT ON wdkuser.step_analysis_pkseq TO COMM_WDK_W;
+
+CREATE SEQUENCE usercomments.comments_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.comments_pkseq to COMM_WDK_W;
+GRANT select on usercomments.comments_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.commentfile_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.commentfile_pkseq to COMM_WDK_W;
+GRANT select on usercomments.commentfile_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.commentreference_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.commentreference_pkseq to COMM_WDK_W;
+GRANT select on usercomments.commentreference_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.commentsequence_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.commentsequence_pkseq to COMM_WDK_W;
+GRANT select on usercomments.commentsequence_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.commentstableid_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.commentstableid_pkseq to COMM_WDK_W;
+GRANT select on usercomments.commentstableid_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.commenttargetcategory_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.commenttargetcategory_pkseq to COMM_WDK_W;
+GRANT select on usercomments.commenttargetcategory_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.external_databases_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.external_databases_pkseq to COMM_WDK_W;
+GRANT select on usercomments.external_databases_pkseq to GUS_R;
+
+CREATE SEQUENCE usercomments.locations_pkseq START WITH 100000000 INCREMENT BY 10;
+GRANT select on usercomments.locations_pkseq to COMM_WDK_W;
+GRANT select on usercomments.locations_pkseq to GUS_R;
+
+
+=cut
+
