@@ -57,12 +57,14 @@ foreach my $seq (@sequences) {
   my $start = $max + 10;
   print STDERR "$seq->{table} $max\n";
   dbh_do("ALTER SEQUENCE $seq->{schema}.$seq->{sequence} INCREMENT BY 10 START WITH $start");
+  dbh_do("ALTER SEQUENCE $seq->{schema}.$seq->{sequence} RESTART");
 }
 
 sub dbh_do {
   my ($sql) = @_;
   if ($doit) {
     $dbh->do($sql);
+    print STDERR "executing: ";
   }
   print STDERR $sql . "\n";
 }
