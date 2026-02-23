@@ -8,6 +8,7 @@ use File::Basename;
 use FindBin;
 use lib "$FindBin::Bin/../lib/perl";
 use ApiCommonData::Load::Psql;
+use ApiCommonData::Load::OracleDumper qw(dumpOracleSchema);
 
 my ($userOrAccount, $sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
 
@@ -73,19 +74,38 @@ foreach my $schemaName (keys %$targetSchemas) {
   die "DDL file $ddlFile does not exist\n" unless -e $ddlFile;
 }
 
+# Build $oracleSchemas data structure from $targetSchemas
+# Process target schemas in alphabetical order to ensure proper FK ordering
+# (hack: this puts 'wdkuser' last. It contains USERS table that others depend on)
+my $oracleSchemas = {};
+foreach my $targetSchema (sort keys %$targetSchemas) {
+  my $sourceSchema = $targetSchemas->{$targetSchema}->{sourceSchema} || $targetSchema;
+  my $tablesToKeep = $targetSchemas->{$targetSchema}->{tablesToKeep};
+
+  # Initialize array for this source schema if not already present
+  $oracleSchemas->{$sourceSchema} ||= [];
+
+  # Add tables in order (they're already properly ordered in tablesToKeep)
+  push @{$oracleSchemas->{$sourceSchema}}, reverse @$tablesToKeep;
+}
+
 # dump oracle schemas to csv files
 unless (-e $workspaceDir) { mkdir "$workspaceDir" || die "Failed creating dir $workspaceDir\n"; }
 unless (-e "$workspaceDir/dump") {mkdir "$workspaceDir/dump" || die "Failed creating dir $workspaceDir/dump\n"; }
-foreach my $sourceSchema (@sourceSchemas) {
+
+# dump alphabetically, to ensure userlogins5 goes last (for USERS table dependencies)
+foreach my $sourceSchema (sort keys %$oracleSchemas) {
+  next if $sourceSchema eq 'edauser';
   print STDERR "Dumping $sourceSchema\n";
   unless (-e "$workspaceDir/dump/$sourceSchema") { mkdir "$workspaceDir/dump/$sourceSchema" || die "Failed creating dir $workspaceDir/dump/$sourceSchema\n"; }
-  chdir "$workspaceDir/dump/$sourceSchema" || die "Failed chdir $workspaceDir/dump/$sourceSchema\n";
-  my $cmd = "$FindBin::Bin/dumpOracleSchemaToCsvFiles $oracleInstance $dbuser $dbpass $sourceSchema";
-  if (system("$cmd")) {
-    print STDERR ">>> execution failed: $!\n\n";
 
-    $cmd =~ s/\Q$dbpass/******/gi;
-    print STDERR ">>> failed command: $cmd\n\n";
+  # Call the library function with ordered table list
+  eval {
+    dumpOracleSchema($oracleInstance, $dbuser, $dbpass, $sourceSchema,
+                     "$workspaceDir/dump/$sourceSchema", $oracleSchemas->{$sourceSchema});
+  };
+  if ($@) {
+    print STDERR ">>> Oracle dump failed for schema $sourceSchema: $@\n\n";
     die;
   }
 }

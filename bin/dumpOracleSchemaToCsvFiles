@@ -38,7 +38,7 @@ my $table_sth = $dbh->prepare("
 $table_sth->execute($target_schema);
 
 while (my ($table_name) = $table_sth->fetchrow_array) {
-#  next if $table_name eq 'DATASET_VALUES';
+  next if $table_name eq 'DATASET_VALUES';
 
   if (-e "$table_name.csv") {
     print "Found file: $table_name.csv\n";
