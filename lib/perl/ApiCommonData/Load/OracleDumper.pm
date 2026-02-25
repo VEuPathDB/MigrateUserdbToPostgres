@@ -115,13 +115,15 @@ sub dumpOracleSchema {
 sub _getTableSql {
     my ($target_schema, $table_name) = @_;
 
+    my $projIdCol = "CASE WHEN project_id = 'EuPathDB' THEN 'UniDB' ELSE project_id END AS project_id";
+
     # Table-specific SQL queries to select only needed columns
     my %table_sql = (
         'DATASETS' => "SELECT DATASET_ID, USER_ID, DATASET_NAME, DATASET_SIZE, CONTENT_CHECKSUM, CREATED_TIME, UPLOAD_FILE, PARSER FROM $target_schema.datasets",
 
-        'USER_BASKETS' => "SELECT basket_id, user_id, basket_name, project_id, record_class, pk_column_1, pk_column_2, pk_column_3 FROM $target_schema.user_baskets",
+        'USER_BASKETS' => "SELECT basket_id, user_id, basket_name, $projIdCol, record_class, pk_column_1, pk_column_2, pk_column_3 FROM $target_schema.user_baskets",
 
-        'FAVORITES' => "SELECT favorite_id, user_id, project_id, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted FROM $target_schema.favorites",
+        'FAVORITES' => "SELECT favorite_id, user_id, $projIdCol, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted FROM $target_schema.favorites",
 
         'EXTERNAL_DATABASES' => "SELECT external_database_id, external_database_name, external_database_version FROM $target_schema.external_databases",
 
@@ -129,13 +131,26 @@ sub _getTableSql {
 
         'DATASET_VALUES' => "SELECT dataset_value_id, dataset_id, dataset_value_order, data1, data2, data3, data4, data5, data6, data7 FROM $target_schema.dataset_values",
 
-        'STEPS' => "SELECT step_id, user_id, left_child_id, right_child_id, create_time, last_run_time, estimate_size, custom_name, is_deleted, is_valid, collapsed_name, is_collapsible, assigned_weight, project_id, project_version, question_name, strategy_id, display_params, display_prefs, branch_is_expanded, branch_name FROM $target_schema.steps",
+        'STEPS' => "SELECT step_id, user_id, left_child_id, right_child_id, create_time, last_run_time, estimate_size, custom_name, is_deleted, is_valid, collapsed_name, is_collapsible, assigned_weight, $projIdCol, project_version, question_name, strategy_id, display_params, display_prefs, branch_is_expanded, branch_name FROM $target_schema.steps",
 
-        'STRATEGIES' => "SELECT strategy_id, user_id, root_step_id, project_id, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public FROM $target_schema.strategies WHERE root_step_id IN (SELECT step_id FROM $target_schema.steps)",
+        'STRATEGIES' => "SELECT strategy_id, user_id, root_step_id, $projIdCol, version, is_saved, create_time, last_view_time, last_modify_time, description, signature, name, saved_name, is_deleted, is_public FROM $target_schema.strategies WHERE root_step_id IN (SELECT step_id FROM $target_schema.steps)",
 
         'STEP_ANALYSIS' => "SELECT analysis_id, step_id, display_name, user_notes, is_new AS revision_status, has_params, invalid_step_reason, context_hash, context, properties FROM $target_schema.step_analysis",
 
         'ACCOUNT_PROPERTIES' => "SELECT user_id, key, value FROM $target_schema.account_properties WHERE user_id IN (SELECT user_id FROM $target_schema.accounts)",
+
+        # Multi-BLAST tables with digest columns (prepend \x for PostgreSQL BYTEA hex format)
+        'MULTIBLAST_JOBS' => "SELECT '\\x' || job_digest AS job_digest, job_config, query, queue_id, $projIdCol, status, created_on, delete_on FROM $target_schema.multiblast_jobs",
+
+        'MULTIBLAST_JOB_TO_TARGETS' => "SELECT '\\x' || job_digest AS job_digest, organism, target_file FROM $target_schema.multiblast_job_to_targets",
+
+        'MULTIBLAST_JOB_TO_JOBS' => "SELECT '\\x' || job_digest AS job_digest, '\\x' || parent_digest AS parent_digest, position FROM $target_schema.multiblast_job_to_jobs",
+
+        'MULTIBLAST_USERS' => "SELECT '\\x' || job_digest AS job_digest, user_id, description, max_download_size, run_directly FROM $target_schema.multiblast_users",
+
+        'MULTIBLAST_FMT_JOBS' => "SELECT '\\x' || report_digest AS report_digest, '\\x' || job_digest AS job_digest, status, config, queue_id, created_on FROM $target_schema.multiblast_fmt_jobs",
+
+        'MULTIBLAST_USERS_TO_FMT_JOBS' => "SELECT '\\x' || report_digest AS report_digest, user_id, description FROM $target_schema.multiblast_users_to_fmt_jobs",
     );
 
     # Return custom SQL if defined, otherwise default SELECT *
