@@ -150,7 +150,7 @@ if ($createSchemas) {
 
 loadCsvFiles($workspaceDir, $targetSchemas, "$workspaceDir/clean", "$workspaceDir/logs", $dbuser, $dbpass, $pgDatabase, $pgHost, $pgDbh);
 
-print STDERR "Migration done.\n";
+print STDERR "Migration done. Now set the sequences\n";
 
 ########################################################################################
 

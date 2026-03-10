@@ -67,7 +67,6 @@ sub dumpOracleSchema {
 
     # Dump tables in the order provided
     foreach my $table_name (@$tables) {
-       next if $table_name eq 'DATASET_VALUES';
       my $output_file = "$output_dir/$table_name.csv";
 
         if (-e $output_file) {
