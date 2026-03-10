@@ -123,6 +123,8 @@ sub _getTableSql {
 
         'USER_BASKETS' => "SELECT basket_id, user_id, basket_name, $projIdCol, record_class, pk_column_1, pk_column_2, pk_column_3 FROM $target_schema.user_baskets",
 
+        'PREFERENCES' => "SELECT user_id, $projIdCol, preference_name, preference_value FROM $target_schema.preferences",
+
         'FAVORITES' => "SELECT favorite_id, user_id, $projIdCol, record_class, pk_column_1, pk_column_2, pk_column_3, record_note, record_group, is_deleted FROM $target_schema.favorites",
 
         'EXTERNAL_DATABASES' => "SELECT external_database_id, external_database_name, external_database_version FROM $target_schema.external_databases",
