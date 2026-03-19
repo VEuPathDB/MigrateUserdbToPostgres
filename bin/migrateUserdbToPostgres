@@ -135,7 +135,7 @@ mkdir "$workspaceDir/logs" || die "Can't mkdir $workspaceDir/logs\n";
 
 if ($createSchemas) {
   `rm -r $workspaceDir/load`;
-  foreach my $schemaName (keys %$targetSchemas) {
+  foreach my $schemaName (sort { $b cmp $a } keys %$targetSchemas) {
     my $logFile = "$workspaceDir/logs/$schemaName";
 
     # drop old schema
@@ -239,7 +239,7 @@ sub loadCsvFiles {
   unless (-e "$workspaceDir/load") { mkdir "$workspaceDir/load" || die "Failed mkdir $workspaceDir/load \n"; }
 
   # Loop through schemas in dump dir
-  foreach my $schemaName (keys %$targetSchemas) {
+  foreach my $schemaName (sort { $b cmp $a } keys %$targetSchemas) {
     print STDERR "Loading schema: $schemaName\n";
 
     unless (-e "$workspaceDir/load/$schemaName") { mkdir "$workspaceDir/load/$schemaName" || die "Failed mkdir $workspaceDir/load/$schemaName \n"; }
