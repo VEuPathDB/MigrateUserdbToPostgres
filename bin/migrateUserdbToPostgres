@@ -10,6 +10,10 @@ use lib "$FindBin::Bin/../lib/perl";
 use ApiCommonData::Load::Psql;
 use ApiCommonData::Load::OracleDumper qw(dumpOracleSchema);
 
+$| = 1;                          # autoflush STDOUT
+select STDERR; $| = 1;           # autoflush STDERR
+select STDOUT;                   # restore default
+
 my ($userOrAccount, $sourceCodeDir, $workspaceDir, $dbuser, $dbpass, $oracleInstance, $pgDatabase, $pgHost, $createSchemas) = @ARGV;
 
 die "
